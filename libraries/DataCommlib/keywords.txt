@@ -1,0 +1,27 @@
+#######################################
+# Syntax Coloring Map For Bridge
+#######################################
+
+#######################################
+# Class (KEYWORD1)
+#######################################
+
+# check other keywords.txt files for examples of filling this in
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+# methods names in commond
+
+# Bridge Class
+
+# Console Class
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+#FILE_READ	LITERAL1
+#FILE_WRITE	LITERAL1
+#FILE_APPEND	LITERAL1
