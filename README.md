@@ -1,0 +1,1 @@
+Kopiera alla filer till där din arduino sketchbook ligger så kommer man åt alla filer och den använder dependencies rätt.
