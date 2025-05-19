@@ -1,0 +1,5 @@
+LAB3:
+Because the access point needs to repeat everything we need a functional adressing in our frame, this information is stored in the first byte in the frame, the first 4 bites are the source and the second 4 bites is the Destination address. Here we could use the get_address() (class shield) method in c lib. The methods setMyAdress(int) and getMyAddress() is also of interest in this laboration
+There is three adresses that can be controlled through DIP switches.
+Idea to solve problem -> setMyAddress(int) - set the developer address. getMyAdress() - Read own adress. get_address() - read address from DIP switches
+So to send data from developer to master you put the dip switches in the right positions (see the reference manual)
