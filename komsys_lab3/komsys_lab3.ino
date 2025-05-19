@@ -23,6 +23,7 @@ void send_byte(byte data);
 bool detect_byte(byte data, int timeout);
 void detect_frame(long data);
 long read_next_bits(long data, int length);
+int my_address;
 
 //
 // Runtime
@@ -51,6 +52,8 @@ long recFrame;
 void setup() {
   Serial.begin(9600);
   sh.begin();
+  sh.setMyAddress(1);
+  int my_address = sh.getMyAddress();
 
   //////////////////////////////////////////////////////////
   //
@@ -92,6 +95,7 @@ void loop() {
       }
       else {
         Serial.println("timeout reached");
+        break;
       }
       state = L2_FRAME_REC;
       // ---
@@ -100,8 +104,8 @@ void loop() {
     case L2_DATA_SEND:
       Serial.println("[State] L2_DATA_SEND");
       // +++ add code here
-      tx.frame_to = 0;
-      tx.frame_from = 0;
+      tx.frame_to = 2;
+      tx.frame_from = sh.getMyAddress();
       tx.frame_type = FRAME_TYPE_DATA;
       tx.frame_seqnum = 0;
       tx.frame_crc = 0;
@@ -126,6 +130,11 @@ void loop() {
       //Serial.println(read_)
       rx.frame = recFrame;
       rx.frame_decompose();
+      if (rx.frame_to != sh.getMyAddress()){
+        Serial.println("Wrong adress, discarding frame!");
+        state = L1_RECEIVE;
+        break;
+      }
       state = APP_PRODUCE;
       // ---
       break;
