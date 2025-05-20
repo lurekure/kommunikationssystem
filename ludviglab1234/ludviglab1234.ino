@@ -60,6 +60,10 @@ void setup() {
 int my_address = 8; //Hard coded address
 sh.setMyAddress(my_address);
 
+//lab4 global variables
+byte tx_seqnum = 0;
+byte expected_seqnum = 0;
+
   state = APP_PRODUCE;
   
   // Set your development node's address here
@@ -94,13 +98,19 @@ void loop() {
       if (l1_receive(5000) == true){
         Serial.println("frame recieved");
 
+        //are we waiting for ack or data?
+        if(tx.frame_type == FRAME_TYPE_DATA){
+          state = L2_ACK_REC; //If we sent data, we expect ACK
+        }
+        else{
+          state = L2_FRAME_REC; //If we send ACK, we expect DATA
+        }
+
       }
       else {
         Serial.println("timeout reached");
-        break;
+        state = L2_RETRANSMIT;
       }
-      state = L2_FRAME_REC;
-
       // ---
       break;
 
@@ -110,7 +120,7 @@ void loop() {
       tx.frame_to = sh.get_address();
       tx.frame_from = sh.getMyAddress();
       tx.frame_type = FRAME_TYPE_DATA;
-      tx.frame_seqnum = 0;
+      tx.frame_seqnum = tx_seqnum;
       tx.frame_crc = 0;
       //tx.frame_payload = 12;
       tx.frame_payload = LED_PAYLOAD;
@@ -124,6 +134,7 @@ void loop() {
       Serial.println("[State] L2_RETRANSMIT");
       // +++ add code here
 
+      state = L1_SEND;
       // ---
       break;
 
@@ -143,28 +154,69 @@ void loop() {
         break;
         }
 
-        //DON'T KNOW IF DEVELOPER NODE SHOULD ACT ON INCOMING DATA YET???
-        /*if (rx.frame_type == 2){
-          byte ledindex = rx.frame_payload;
-          sh.
-        }
-          */
 
-        state = APP_PRODUCE; //Start sending again (Starting the application again), because the frame recognision went through
-        // ---
+        /*LAB4 changes - if recieved frame is of type data -> send ack
+        * If recieved frame is of type data but wrong expected seq-number -> do not not change expected seqnumber and send ack packet
+        */
+        if (rx.frame_type == FRAME_TYPE_DATA){
+          if (rx.frame_seqnum == expected_seqnum){
+            Serial.println("Correct data frame recieved");
+
+            //If we should act on data, it should be done here
+
+            expected_seqnum = (expected_seqnum + 1) % 16;
+          }
+          else{
+            Serial.println("Duplicate data frame recieved")
+          }
+
+          state = L2_ACK_SEND;
+        }
+        else{
+          Serial.println("Non-data frame recieved")
+          state =  L1_RECEIVE;
+        }
+
       break;
+
 
     case L2_ACK_SEND:
       Serial.println("[State] L2_ACK_SEND");
       // +++ add code here
-
+      tx.frame_to = rx.frame_from;
+      tx.frame_from = sh.getMyAddress();
+      tx.frame_type = FRAME_TYPE_ACK;
+      tx.frame_seqnum = rx.frame_seqnum;
+      tx.frame_crc = 0;
+      //tx.frame_payload = 12;
+      tx.frame_payload = 0;
+      tx.frame_generation();
+      
+      state = L1_SEND;
       // ---
       break;
 
     case L2_ACK_REC:
       Serial.println("[State] L2_ACK_REC");
       // +++ add code here
-      
+      rx.frame = recFrame;
+      rx.frame_decompose;
+
+      if (rx.frame_to != sh.getMyAddress()){
+        Serial.println("ACK not for me")
+        state = L1_RECEIVE;
+        break;
+      }
+
+      if(rx.frame_type == FRAME_TYPE_ACK && rx.frame_seqnum == tx_seqnum){
+        Serial.println("ACK recieved and matches seqnum");
+        tx_seqnum = (tx_seqnum + 1) % 16;
+        state = APP_PRODUCE;
+      }
+      else{
+        Serial.println("Wrong or missing ACK");
+        state = L2_RETRANSMIT;
+      }
       // ---
       break;
 
