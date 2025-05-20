@@ -10,6 +10,9 @@
 //
 // Select library
 #include <datacommlib.h>
+#include <cstdint>
+#include <iostream>
+
 
 //
 // Prototypes
@@ -57,6 +60,13 @@ void setup() {
   // Add init code here
   //
 
+int my_address = 8; //Hard coded address
+sh.setMyAddress(my_address);
+
+//lab4 global variables
+byte tx_seqnum = 0;
+byte expected_seqnum = 0;
+
   state = APP_PRODUCE;
   
   // Set your development node's address here
@@ -90,25 +100,30 @@ void loop() {
       //If shell recieved a premable + SFD + Frame within 5000ms, go to 
       if (l1_receive(5000) == true){
         Serial.println("frame recieved");
-        digitalWrite(DEB_2,HIGH);
+
+        //are we waiting for ack or data?
+        if(tx.frame_type == FRAME_TYPE_DATA){
+          state = L2_ACK_REC; //If we sent data, we expect ACK
+        }
+        else{
+          state = L2_FRAME_REC; //If we send ACK, we expect DATA
+        }
 
       }
       else {
         Serial.println("timeout reached");
-        digitalWrite(DEB_1, HIGH); //Turns on debug led 1
+        state = L2_RETRANSMIT;
       }
-      state = L2_FRAME_REC;
-
       // ---
       break;
 
     case L2_DATA_SEND:
       Serial.println("[State] L2_DATA_SEND");
       // +++ add code here
-      tx.frame_to = 0;
-      tx.frame_from = 0;
+      tx.frame_to = sh.get_address();
+      tx.frame_from = sh.getMyAddress();
       tx.frame_type = FRAME_TYPE_DATA;
-      tx.frame_seqnum = 0;
+      tx.frame_seqnum = tx_seqnum;
       tx.frame_crc = 0;
       //tx.frame_payload = 12;
       tx.frame_payload = LED_PAYLOAD;
@@ -122,6 +137,7 @@ void loop() {
       Serial.println("[State] L2_RETRANSMIT");
       // +++ add code here
 
+      state = L1_SEND;
       // ---
       break;
 
@@ -130,21 +146,80 @@ void loop() {
       // +++ add code here
       rx.frame = recFrame; //Puts the recieved frame recFrame into rx.frame object
       rx.frame_decompose(); //Decomposes the frame (32bit) into it's parts
-      state = APP_PRODUCE; //Start sending again (Starting the application again)
-      // ---
+        if (rx.frame_to != sh.getMyAddress()) {
+          Serial.print("Frame not for me. My address: ");
+          Serial.print(sh.getMyAddress());
+          Serial.print(", frame to: ");
+          Serial.println(rx.frame_to);
+    
+        // Silently drop frame by going back to listening
+        state = L1_RECEIVE;
+        break;
+        }
+
+
+        /*LAB4 changes - if recieved frame is of type data -> send ack
+        * If recieved frame is of type data but wrong expected seq-number -> do not not change expected seqnumber and send ack packet
+        */
+        if (rx.frame_type == FRAME_TYPE_DATA){
+          if (rx.frame_seqnum == expected_seqnum){
+            Serial.println("Correct data frame recieved");
+
+            //If we should act on data, it should be done here
+
+            expected_seqnum = (expected_seqnum + 1) % 16;
+          }
+          else{
+            Serial.println("Duplicate data frame recieved")
+          }
+
+          state = L2_ACK_SEND;
+        }
+        else{
+          Serial.println("Non-data frame recieved")
+          state =  L1_RECEIVE;
+        }
+
       break;
+
 
     case L2_ACK_SEND:
       Serial.println("[State] L2_ACK_SEND");
       // +++ add code here
-
+      tx.frame_to = rx.frame_from;
+      tx.frame_from = sh.getMyAddress();
+      tx.frame_type = FRAME_TYPE_ACK;
+      tx.frame_seqnum = rx.frame_seqnum;
+      tx.frame_crc = 0;
+      //tx.frame_payload = 12;
+      tx.frame_payload = 0;
+      tx.frame_generation();
+      
+      state = L1_SEND;
       // ---
       break;
 
     case L2_ACK_REC:
       Serial.println("[State] L2_ACK_REC");
       // +++ add code here
-      
+      rx.frame = recFrame;
+      rx.frame_decompose;
+
+      if (rx.frame_to != sh.getMyAddress()){
+        Serial.println("ACK not for me")
+        state = L1_RECEIVE;
+        break;
+      }
+
+      if(rx.frame_type == FRAME_TYPE_ACK && rx.frame_seqnum == tx_seqnum){
+        Serial.println("ACK recieved and matches seqnum");
+        tx_seqnum = (tx_seqnum + 1) % 16;
+        state = APP_PRODUCE;
+      }
+      else{
+        Serial.println("Wrong or missing ACK");
+        state = L2_RETRANSMIT;
+      }
       // ---
       break;
 
@@ -175,6 +250,7 @@ void loop() {
       break;
   }
 
+
   //////////////////////////////////////////////////////////
 }
 
@@ -200,17 +276,30 @@ boolean l1_receive(int timeout) {
   long time = millis(); //start time
   int foundBit;
   bool preambleOK = detect_byte(PREAMBLE_SEQ, timeout); //True if expected premable is the premable
-  if (preambleOK){
+  if (!preambleOK) return false;
+
+  if (preambleOK){  
     Serial.println("Preamble found");
     bool SFDOK = detect_byte(SFD_SEQ, timeout); //True if expected SFD is the SFD
+    if (!SFDOK) return false;
+
     if (SFDOK){
+      digitalWrite(DEB_1, HIGH); //Turns on debug led 1
       Serial.println("SFD found");
       // decoding frame
       for (int i = 0; i <= 31; i++) {
         foundBit = sh.sampleRecCh(PIN_RX);
         recFrame = (recFrame << 1) | foundBit;
+        //Debug
+        if (foundBit == 1){
+          digitalWrite(DEB_2, HIGH);
+        }
+        else{
+          digitalWrite(DEB_2,LOW);
+        }
         delay(T_S);  // 100ms per bit
       }
+      digitalWrite(DEB_2, HIGH); //Turns on debug led 2
       Serial.println(recFrame);
     }
   }
@@ -231,27 +320,78 @@ void send_byte(byte data) {
   }
 }
 
-long read_next_bits(long data, int length){
-  long result = 0;
-  for (int i = length-1; i >= 0; i--) {
-    int bits = (data >> i) & 1;
-    result = result + bits*pow(2,i);
-  }
-  return result;
-}
-
-//ADD PRINTING OUT OF THE SDF AND PREMABLE
-//The function detectbyte takes the a byte parameted wantedByte and integer timeout (ms), Returns true if the wantedByte is detected, If the timeout integer (ms) is reached, the function returns false
-bool detect_byte(byte wantedByte, int timeout_ms) {  
-  //While loop that tries to find wantedbyte until the timeout_ms is reached. The "Or" statement gives readByte the value of the input byte from photo diode, but it looks for a full byte and then compares it to wantedbyte.
-  while ((millis() - start) < timeout_ms) {
-    byte readByte = 0;
-    for (int i = 0; i < 8; i++) {
-      readByte = (readByte << 1) | sh.sampleRecCh(PIN_RX);
-      delay(T_S);  
+bool detect_byte(byte wantedByte, int timeout){
+  long time = millis();
+  bool synched = false;
+  Serial.print("Searching for byte: ");
+  Serial.println(wantedByte);
+  while (synched == false){
+    byte foundByte = 0;
+    for (int i = 7; i >= 0; i--) {
+      int correctBit = (wantedByte >> i) & 1;
+      int foundBit = sh.sampleRecCh(PIN_RX);
+      if (correctBit != foundBit){
+        break;
+      }
+      foundByte = (foundByte << 1) | foundBit;
+      if (i == 0){
+        synched = true;
+        Serial.print("Found byte: ");
+        Serial.println(foundByte);
+      }
+      delay(T_S);  // 100ms per bit
     }
-    if (readByte == wantedByte) return true;
+    if (millis()-time >= timeout){
+      Serial.println("timeout reached");
+      return false;
+    }
   }
-  return false;
+	return true;
 }
 
+// Function to compute CRC-8 Bluetooth using shift-register style
+uint8_t computeCRC8Bluetooth(uint32_t frame) {
+    const uint8_t POLY = 0xA7;  // CRC-8 Bluetooth polynomial
+    uint8_t crc = 0x00;
+
+    // Loop over each bit in the 32-bit frame (MSB first)
+    for (int i = 31; i >= 0; --i) {
+        // Extract current data bit
+        uint8_t bit = (frame >> i) & 0x01;
+
+        // XOR with the MSB of the CRC
+        uint8_t msb = (crc >> 7) & 0x01;
+        uint8_t feedback = msb ^ bit;
+
+        // Shift CRC left by 1
+        crc <<= 1;
+
+        // If feedback bit is 1, apply polynomial
+        if (feedback) {
+            crc ^= POLY;
+        }
+    }
+
+    return crc;
+}
+
+// Function to verify if received CRC matches computed CRC
+bool verifyCRC8Bluetooth(uint32_t frame, uint8_t receivedCRC) {
+    uint8_t calculatedCRC = computeCRC8Bluetooth(frame);
+    return (calculatedCRC == receivedCRC);
+}
+
+// Example usage
+int main() {
+    uint32_t frame = 0xDEADBEEF;
+    uint8_t crc = computeCRC8Bluetooth(frame);
+    std::cout << "Computed CRC: 0x" << std::hex << (int)crc << std::endl;
+
+    if (verifyCRC8Bluetooth(frame, crc)) {
+        std::cout << "CRC verified successfully." << std::endl;
+    } else {
+        std::cout << "CRC verification failed." << std::endl;
+    }
+
+    return 0;
+}
