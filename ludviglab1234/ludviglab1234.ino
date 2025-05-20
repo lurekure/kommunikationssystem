@@ -10,7 +10,6 @@
 //
 // Select library
 #include <datacommlib.h>
-#include <vector>
 #include <cstdint>
 #include <iostream>
 
@@ -67,8 +66,6 @@ sh.setMyAddress(my_address);
 //lab4 global variables
 byte tx_seqnum = 0;
 byte expected_seqnum = 0;
-const uint16_t CRC_POLY = 0b111010101;  // 9-bit divisor (degree 8)
-
 
   state = APP_PRODUCE;
   
@@ -352,22 +349,49 @@ bool detect_byte(byte wantedByte, int timeout){
 	return true;
 }
 
-// Takes a 32-bit value (your L2 frame) and returns 8-bit CRC
-uint8_t compute_crc(uint32_t frame_data) {
-  uint8_t reg = 0;
+// Function to compute CRC-8 Bluetooth using shift-register style
+uint8_t computeCRC8Bluetooth(uint32_t frame) {
+    const uint8_t POLY = 0xA7;  // CRC-8 Bluetooth polynomial
+    uint8_t crc = 0x00;
 
-  // Process each bit (MSB first)
-  for (int i = 31; i >= 0; --i) {
-      bool input_bit = (frame_data >> i) & 1;
-      bool msb = (reg & 0x80) != 0;
+    // Loop over each bit in the 32-bit frame (MSB first)
+    for (int i = 31; i >= 0; --i) {
+        // Extract current data bit
+        uint8_t bit = (frame >> i) & 0x01;
 
-      reg <<= 1;
-      reg |= input_bit;
+        // XOR with the MSB of the CRC
+        uint8_t msb = (crc >> 7) & 0x01;
+        uint8_t feedback = msb ^ bit;
 
-      if (msb) {
-          reg ^= (CRC_POLY & 0xFF);
-      }
-  }
+        // Shift CRC left by 1
+        crc <<= 1;
 
-  return reg;
+        // If feedback bit is 1, apply polynomial
+        if (feedback) {
+            crc ^= POLY;
+        }
+    }
+
+    return crc;
+}
+
+// Function to verify if received CRC matches computed CRC
+bool verifyCRC8Bluetooth(uint32_t frame, uint8_t receivedCRC) {
+    uint8_t calculatedCRC = computeCRC8Bluetooth(frame);
+    return (calculatedCRC == receivedCRC);
+}
+
+// Example usage
+int main() {
+    uint32_t frame = 0xDEADBEEF;
+    uint8_t crc = computeCRC8Bluetooth(frame);
+    std::cout << "Computed CRC: 0x" << std::hex << (int)crc << std::endl;
+
+    if (verifyCRC8Bluetooth(frame, crc)) {
+        std::cout << "CRC verified successfully." << std::endl;
+    } else {
+        std::cout << "CRC verification failed." << std::endl;
+    }
+
+    return 0;
 }
