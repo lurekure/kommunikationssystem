@@ -10,6 +10,10 @@
 //
 // Select library
 #include <datacommlib.h>
+#include <vector>
+#include <cstdint>
+#include <iostream>
+
 
 //
 // Prototypes
@@ -63,6 +67,8 @@ sh.setMyAddress(my_address);
 //lab4 global variables
 byte tx_seqnum = 0;
 byte expected_seqnum = 0;
+const uint16_t CRC_POLY = 0b111010101;  // 9-bit divisor (degree 8)
+
 
   state = APP_PRODUCE;
   
@@ -344,4 +350,24 @@ bool detect_byte(byte wantedByte, int timeout){
     }
   }
 	return true;
+}
+
+// Takes a 32-bit value (your L2 frame) and returns 8-bit CRC
+uint8_t compute_crc(uint32_t frame_data) {
+  uint8_t reg = 0;
+
+  // Process each bit (MSB first)
+  for (int i = 31; i >= 0; --i) {
+      bool input_bit = (frame_data >> i) & 1;
+      bool msb = (reg & 0x80) != 0;
+
+      reg <<= 1;
+      reg |= input_bit;
+
+      if (msb) {
+          reg ^= (CRC_POLY & 0xFF);
+      }
+  }
+
+  return reg;
 }
