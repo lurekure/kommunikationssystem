@@ -28,7 +28,7 @@ int     my_address;
 int     sequence;
 byte    LED_PAYLOAD;
 unsigned long ACK_timeout;
-const unsigned long ACK_timeout_threshold = 20000;
+const unsigned long ACK_timeout_threshold = 25000;
 int     retransmit_nbr;
 int state = NONE;
 
@@ -46,7 +46,7 @@ void setup() {
   sh.begin();
   sh.setMyAddress(1);
   my_address = sh.getMyAddress();
-  sequence = 0;
+  sequence = -1;
   retransmit_nbr = 0;
   state = APP_PRODUCE;
 }
@@ -71,7 +71,7 @@ void loop() {
         state = L2_RETRANSMIT;
         break;
       }
-      if (!l1_receive(20000)) {
+      if (!l1_receive(ACK_timeout_threshold)) {
         state = L2_RETRANSMIT;
         break;
       }
@@ -83,7 +83,7 @@ void loop() {
     case L2_DATA_SEND:
       Serial.println("[State] L2_DATA_SEND");
       sequence++;
-      tx.frame_to      = 2;
+      tx.frame_to      = sh.get_address();
       tx.frame_from    = my_address;
       tx.frame_type    = FRAME_TYPE_DATA;
       tx.frame_seqnum  = sequence;
@@ -227,26 +227,57 @@ void send_byte(byte data) {
 //
 // Byte-synchronizer
 //
-bool detect_byte(byte wanted, int timeout) {
-  unsigned long start = millis();
-  while (millis() - start < timeout) {
-    // try reading 8 bits
-    byte candidate = 0;
+// bool detect_byte(byte wanted, int timeout) {
+//   unsigned long start = millis();
+//   Serial.print("Searching for sync byte: 0x");
+//   Serial.println(wanted, HEX);
+//   while (millis() - start < timeout) {
+//     // try reading 8 bits
+//     byte candidate = 0;
+//     for (int i = 7; i >= 0; i--) {
+//       int b = sh.sampleRecCh(PIN_RX);
+//       candidate = (candidate << 1) | b;
+//       delay(T_S);
+//     }
+//     if (candidate == wanted) {
+//       Serial.print("Found sync byte: 0x");
+//       Serial.println(wanted, HEX);
+//       return true;
+//     }
+//   }
+//   Serial.println("detect_byte: timeout");
+//   return false;
+// }
+bool detect_byte(byte wantedByte, int timeout){
+  long time = millis();
+  bool synched = false;
+  Serial.print("Searching for byte: ");
+  Serial.println(wantedByte);
+  while (synched == false){
+    byte foundByte = 0;
     for (int i = 7; i >= 0; i--) {
-      int b = sh.sampleRecCh(PIN_RX);
-      candidate = (candidate << 1) | b;
-      delay(T_S);
+      int correctBit = (wantedByte >> i) & 1;
+      int foundBit = sh.sampleRecCh(PIN_RX);
+      Serial.print(foundBit);
+      Serial.print(" ");
+      if (correctBit != foundBit){
+        break;
+      }
+      foundByte = (foundByte << 1) | foundBit;
+      if (i == 0){
+        synched = true;
+        Serial.print("Found byte: ");
+        Serial.println(foundByte);
+      }
+      delay(T_S);  // 100ms per bit
     }
-    if (candidate == wanted) {
-      Serial.print("Found sync byte: 0x");
-      Serial.println(wanted, HEX);
-      return true;
+    if (millis()-time >= timeout){
+      Serial.println("timeout reached");
+      return false;
     }
   }
-  Serial.println("detect_byte: timeout");
-  return false;
+	return true;
 }
-
 //
 // Compute CRC‐8 (gen=0xA7) over an array of len bytes
 //
