@@ -18,7 +18,8 @@
 // predefined functions
 void l1_send(unsigned long l2frame, int framelen);
 boolean l1_receive(int timeout);
-uint8_t crc8_from_frame(unsigned long frame);
+byte    crc8(const byte *data, int len);
+
 
 
 
@@ -49,6 +50,7 @@ long recFrame;
 //lab4 global variables
 int tx_seqnum;
 int expected_seqnum;
+int calculated_crc;
 
 //////////////////////////////////////////////////////////
 
@@ -64,7 +66,7 @@ void setup() {
   // Add init code here
   //
 
-int my_address = 8; //Hard coded address
+int my_address = 1; //Hard coded address
 sh.setMyAddress(my_address);
 
 tx_seqnum = 0;
@@ -128,9 +130,19 @@ void loop() {
       tx.frame_type = FRAME_TYPE_DATA;
       tx.frame_seqnum = tx_seqnum;
       tx.frame_payload = LED_PAYLOAD;
-      tx.frame_crc = crc8_from_frame(tx.frame);
-      tx.frame_generation();
       
+      
+      //Computing 
+      {
+      byte tx_type_seq = (tx.frame_type << 4) | tx.frame_seqnum;
+      byte tx_from_to  = (tx.frame_from << 4) | tx.frame_to;
+      const byte tx_frameData[3] = { tx_from_to, tx_type_seq, tx.frame_payload };
+      tx.frame_crc = crc8(tx_frameData, 3);
+      }
+      
+    
+      
+      tx.frame_generation();
       state = L1_SEND;
       // ---
       break;
@@ -148,6 +160,13 @@ void loop() {
       // +++ add code here
       rx.frame = recFrame; //Puts the recieved frame recFrame into rx.frame object
       rx.frame_decompose(); //Decomposes the frame (32bit) into it's parts
+      
+      {
+      byte rx_type_seq = (rx.frame_type << 4) | rx.frame_seqnum;
+      byte rx_from_to  = (rx.frame_from << 4) | rx.frame_to;
+      const byte rx_frameData[3] = { rx_from_to, rx_type_seq, rx.frame_payload };
+      int calculated_crc = crc8(rx_frameData, 3);
+      }
 
         if (rx.frame_to != sh.getMyAddress()) {
           Serial.print("Frame not for me. My address: ");
@@ -161,11 +180,12 @@ void loop() {
         }
 
       //Checking if CRC is ok 
-      if (crc8_from_frame(rx.frame) != rx.frame_crc){
+      if (calculated_crc != rx.frame_crc){
         Serial.println("CRC does not match, frame corrupted");
         state = L1_RECEIVE;
         break;
       }
+      
         /*LAB4 changes - if recieved frame is of type data -> send ack
         * If recieved frame is of type data but wrong expected seq-number -> do not not change expected seqnumber and send ack packet
         */
@@ -199,9 +219,9 @@ void loop() {
       tx.frame_type = FRAME_TYPE_ACK;
       tx.frame_seqnum = rx.frame_seqnum;
       tx.frame_payload = 0;
+      //tx.frame_crc = crc8_from_frame(tx.frame);
       tx.frame_generation();
-      int crc = crc8_from_frame(tx.frame);
-      tx.frame.add_crc(crc);
+
 
       
       state = L1_SEND;
@@ -357,22 +377,19 @@ bool detect_byte(byte wantedByte, int timeout){
 	return true;
 }
 
-// Computes the CRC-8 (Bluetooth) over 3 bytes of a 32-bit frame
-uint8_t crc8_from_frame(unsigned long frame) {
-    uint8_t b0 = (frame >> 24) & 0xFF;
-    uint8_t b1 = (frame >> 16) & 0xFF;
-    uint8_t b2 = (frame >> 8)  & 0xFF;
-
-    uint8_t crc = 0x00; // Initial value
-    for (int i = 0; i < 3; ++i) {
-        uint8_t byte = (i == 0) ? b0 : (i == 1) ? b1 : b2;
-        crc ^= byte;
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 0x80)
-                crc = (crc << 1) ^ 0xA7;
-            else
-                crc <<= 1;
-        }
+byte crc8(const byte *data, int len) {
+  const byte generator = 0xA7;
+  byte crc = 0;
+  for (int i = 0; i < len; i++) {
+    byte b = data[i];
+    for (int bit = 7; bit >= 0; bit--) {
+      bool inBit = (b >> bit) & 1;
+      crc ^= (inBit << 7);
+      if (crc & 0x80)
+        crc = (crc << 1) ^ generator;
+      else
+        crc <<= 1;
     }
-    return crc;
+  }
+  return crc;
 }
