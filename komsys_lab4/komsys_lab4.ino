@@ -7,6 +7,8 @@
 //
 ////////////////////////////
 
+//worked with T5 and R2
+
 //
 // Select library
 #include <datacommlib.h>
@@ -18,7 +20,6 @@ void    l1_send(unsigned long l2frame, int framelen);
 boolean l1_receive(int timeout);
 void    send_byte(byte data);
 bool    detect_byte(byte data, int timeout);
-long    read_next_bits(long data, int length);
 byte    crc8(const byte *data, int len);
 
 //
@@ -37,9 +38,7 @@ Transmit tx;
 Receive  rx;
 unsigned long recFrame;
 
-//
-// Setup
-//
+
 void setup() {
   Serial.begin(9600);
   Serial.println("STARTING SETUP");
@@ -51,9 +50,7 @@ void setup() {
   state = APP_PRODUCE;
 }
 
-//
-// Main loop / state machine
-//
+
 void loop() {
   switch (state) {
 
@@ -66,6 +63,9 @@ void loop() {
 
     case L1_RECEIVE:
       Serial.println("[State] L1_RECEIVE");
+      
+      //Retransmits if 
+ ton si KC
       if (millis() - ACK_timeout > ACK_timeout_threshold) {
         Serial.println("ACK not received in time");
         state = L2_RETRANSMIT;
@@ -116,6 +116,7 @@ void loop() {
       break;
 
     case L2_FRAME_REC:
+      // Sets the frame
       Serial.println("[State] L2_FRAME_REC");
       rx.frame = recFrame;
       rx.frame_decompose();
@@ -123,12 +124,14 @@ void loop() {
       break;
 
     case L2_ACK_REC:
+      // Receives ACK frame and checks if it is valid
       Serial.println("[State] L2_ACK_REC");
       if (millis() - ACK_timeout > ACK_timeout_threshold) {
         Serial.println("ACK not received in time");
         state = L2_RETRANSMIT;
         break;
       }
+      // Checks if Adress and sequence is correct, otherwise dropping the frame
       if (rx.frame_to     != my_address ||
           rx.frame_type   != FRAME_TYPE_ACK ||
           rx.frame_seqnum != sequence) {
@@ -141,6 +144,7 @@ void loop() {
       break;
 
     case APP_PRODUCE:
+      // Produces payload and resets retransmit counter
       Serial.println("[State] APP_PRODUCE");
       LED_PAYLOAD = sh.select_led();
       retransmit_nbr = 0;
@@ -163,29 +167,30 @@ void loop() {
   }
 }
 
-//
-// Physical send (preamble + SFD + bits)
-//
+//sends preamble, SFD and bits
 void l1_send(unsigned long frame, int framelen) {
   send_byte(PREAMBLE_SEQ);
   send_byte(SFD_SEQ);
+  
+  //sends bits on the TX pin
   for (int i = framelen - 1; i >= 0; i--) {
     digitalWrite(PIN_TX, (frame >> i) & 1 ? HIGH : LOW);
     delay(T_S);
   }
 }
 
-//
-// Physical receive + CRC‐8 check (generator 0xA7)
-//
+
+// helper function to receive a frame, validates preamble, SFD and CRC
 boolean l1_receive(int timeout) {
   const byte generator = 0xA7;
   recFrame = 0;
   byte CRC = 0;
 
+  // Detects preamble before reading the frame, otherwise returns false
   if (!detect_byte(PREAMBLE_SEQ, timeout)) return false;
   Serial.println("Preamble found");
 
+  // Detects SFD before reading the frame, otherwise returns false
   if (!detect_byte(SFD_SEQ, timeout)) return false;
   Serial.println("SFD found");
   digitalWrite(DEB_1, HIGH);
@@ -200,12 +205,13 @@ boolean l1_receive(int timeout) {
       CRC = (CRC << 1) ^ generator;
     else
       CRC <<= 1;
-    // assemble the raw frame
+    // assembles the frame
     recFrame = (recFrame << 1) | bit;
     digitalWrite(DEB_2, bit);
     delay(T_S);
   }
 
+  // Checks if CRC is valid, otherwise returns false
   if (CRC != 0) {
     Serial.println("CRC check failed");
     return false;
@@ -214,9 +220,7 @@ boolean l1_receive(int timeout) {
   return true;
 }
 
-//
-// Bit-bang one byte
-//
+// Sends a byte on the TX pin
 void send_byte(byte data) {
   for (int i = 7; i >= 0; i--) {
     digitalWrite(PIN_TX, (data >> i) & 1 ? HIGH : LOW);
@@ -224,9 +228,6 @@ void send_byte(byte data) {
   }
 }
 
-//
-// Byte-synchronizer
-//
 // bool detect_byte(byte wanted, int timeout) {
 //   unsigned long start = millis();
 //   Serial.print("Searching for sync byte: 0x");
@@ -248,6 +249,8 @@ void send_byte(byte data) {
 //   Serial.println("detect_byte: timeout");
 //   return false;
 // }
+
+// Detects a specific byte on the incoming RX pin
 bool detect_byte(byte wantedByte, int timeout){
   long time = millis();
   bool synched = false;
@@ -258,8 +261,8 @@ bool detect_byte(byte wantedByte, int timeout){
     for (int i = 7; i >= 0; i--) {
       int correctBit = (wantedByte >> i) & 1;
       int foundBit = sh.sampleRecCh(PIN_RX);
-      Serial.print(foundBit);
-      Serial.print(" ");
+      // Serial.print(foundBit);  //Debugging recieved bits, sometimes 1 permanently
+      // Serial.print(" ");
       if (correctBit != foundBit){
         break;
       }
@@ -278,9 +281,8 @@ bool detect_byte(byte wantedByte, int timeout){
   }
 	return true;
 }
-//
-// Compute CRC‐8 (gen=0xA7) over an array of len bytes
-//
+
+// CRC-8 generator, generates a CRC byte from a byte array
 byte crc8(const byte *data, int len) {
   const byte generator = 0xA7;
   byte crc = 0;
@@ -296,15 +298,4 @@ byte crc8(const byte *data, int len) {
     }
   }
   return crc;
-}
-
-//
-// Helper: read next <length> bits from <data> (unused here)
-//
-long read_next_bits(long data, int length) {
-  long result = 0;
-  for (int i = length - 1; i >= 0; i--) {
-    result = (result << 1) | ((data >> i) & 1);
-  }
-  return result;
 }
